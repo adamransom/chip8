@@ -1,5 +1,7 @@
 use crate::device;
+use crate::screen;
 
+use log::info;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
@@ -25,8 +27,8 @@ impl App {
 
     fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Arc<Window> {
         let window_size = LogicalSize::new(
-            device::SCREEN_WIDTH * self.scale,
-            device::SCREEN_HEIGHT * self.scale,
+            u32::from(screen::WIDTH) * self.scale,
+            u32::from(screen::HEIGHT) * self.scale,
         );
 
         let window_attributes = WindowAttributes::default()
@@ -48,6 +50,8 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        info!("Creating window");
+
         let window = self.create_window(event_loop);
 
         self.send_event(device::Event::On(window));
