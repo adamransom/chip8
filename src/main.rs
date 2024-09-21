@@ -26,7 +26,7 @@ fn main() {
             _ => panic!("First event must be `On`"),
         };
 
-        device.load("roms/1-chip8-logo.ch8");
+        device.load("roms/4-flags.ch8");
         device.run(receiver);
     });
 
