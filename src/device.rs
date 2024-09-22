@@ -25,6 +25,7 @@ struct Opcode {
 }
 
 pub struct Device {
+    window: Arc<Window>,
     screen: Screen,
     memory: [u8; 4096],
     registers: [u8; 16],
@@ -34,6 +35,7 @@ pub struct Device {
     sp: usize,
     i: u16,
     dt: u8,
+    st: u8,
     wait_key: u8,
     draw_flag: bool,
 }
@@ -41,6 +43,7 @@ pub struct Device {
 impl Device {
     pub fn new(window: Arc<Window>) -> Self {
         Self {
+            window: window.clone(),
             screen: Screen::new(window),
             memory: [0; 4096],
             registers: [0; 16],
@@ -50,6 +53,7 @@ impl Device {
             sp: 0,
             i: 0,
             dt: 0,
+            st: 0,
             wait_key: 0xFF,
             draw_flag: false,
         }
@@ -63,6 +67,8 @@ impl Device {
         let bytes = file.read(program).unwrap();
 
         info!("Loaded {} bytes", bytes);
+
+        self.memory[..Self::FONT.len()].copy_from_slice(&Self::FONT);
     }
 
     pub fn run(&mut self, channel: Receiver<Event>) {
@@ -95,6 +101,7 @@ impl Device {
                 }
 
                 self.handle_delay();
+                self.handle_sound();
                 self.screen.refresh();
             }
 
@@ -115,6 +122,15 @@ impl Device {
     fn handle_delay(&mut self) {
         if self.dt > 0 {
             self.dt -= 1;
+        }
+    }
+
+    fn handle_sound(&mut self) {
+        if self.st > 0 {
+            self.window.set_title("🔊");
+            self.st -= 1;
+        } else {
+            self.window.set_title("CHIP8");
         }
     }
 
@@ -179,6 +195,7 @@ impl Device {
             0x9000 => self.op_9xy0(opcode.x, opcode.y),
             0xA000 => self.op_annn(opcode.nnn),
             0xB000 => self.op_bnnn(opcode.nnn),
+            0xC000 => self.op_cxkk(opcode.x, opcode.kk),
             0xD000 => self.op_dxyn(opcode.x, opcode.y, opcode.n),
             0xE000 => match opcode.kk {
                 0x9e => self.op_ex9e(opcode.x),
@@ -189,7 +206,9 @@ impl Device {
                 0x07 => self.op_fx07(opcode.x),
                 0x0A => self.op_fx0a(opcode.x),
                 0x15 => self.op_fx15(opcode.x),
+                0x18 => self.op_fx18(opcode.x),
                 0x1e => self.op_fx1e(opcode.x),
+                0x29 => self.op_fx29(opcode.x),
                 0x33 => self.op_fx33(opcode.x),
                 0x55 => self.op_fx55(opcode.x),
                 0x65 => self.op_fx65(opcode.x),
@@ -335,6 +354,11 @@ impl Device {
         self.pc = nnn + u16::from(self.register(0));
     }
 
+    // Set Vx = random byte AND kk
+    fn op_cxkk(&mut self, x: u8, kk: u8) {
+        self.registers[usize::from(x)] = kk & rand::random::<u8>();
+    }
+
     // Display n-byte sprite starting at memory location I at (Vx, Vy)
     fn op_dxyn(&mut self, x: u8, y: u8, n: u8) {
         let x_pos = self.register(x);
@@ -377,9 +401,19 @@ impl Device {
         self.dt = self.register(x);
     }
 
+    // Set sound timer = Vx
+    fn op_fx18(&mut self, x: u8) {
+        self.st = self.register(x);
+    }
+
     // Set I = I + Vx
     fn op_fx1e(&mut self, x: u8) {
         self.i += u16::from(self.register(x));
+    }
+
+    // Set I = location of sprite for digit Vx
+    fn op_fx29(&mut self, x: u8) {
+        self.i = u16::from(self.register(x)) * 5;
     }
 
     // Store BCD representation of Vx in memory locations I, I+1, and I+2
@@ -415,4 +449,102 @@ impl Device {
     fn set_flag<T: Into<u8>>(&mut self, value: T) {
         self.registers[0xF] = value.into();
     }
+
+    const FONT: [u8; 80] = [
+        0b11110000,
+        0b10010000,
+        0b10010000,
+        0b10010000,
+        0b11110000,
+
+        0b00100000,
+        0b01100000,
+        0b00100000,
+        0b00100000,
+        0b01110000,
+
+        0b11110000,
+        0b00010000,
+        0b11110000,
+        0b10000000,
+        0b11110000,
+
+        0b11110000,
+        0b00010000,
+        0b11110000,
+        0b00010000,
+        0b11110000,
+
+        0b10010000,
+        0b10010000,
+        0b11110000,
+        0b00010000,
+        0b00010000,
+
+        0b11110000,
+        0b10000000,
+        0b11110000,
+        0b00010000,
+        0b11110000,
+
+        0b11110000,
+        0b10000000,
+        0b11110000,
+        0b10010000,
+        0b11110000,
+
+        0b11110000,
+        0b00010000,
+        0b00100000,
+        0b01000000,
+        0b01000000,
+
+        0b11110000,
+        0b10010000,
+        0b11110000,
+        0b10010000,
+        0b11110000,
+
+        0b11110000,
+        0b10010000,
+        0b11110000,
+        0b00010000,
+        0b11110000,
+
+        0b11110000,
+        0b10010000,
+        0b11110000,
+        0b10010000,
+        0b10010000,
+
+        0b11100000,
+        0b10010000,
+        0b11100000,
+        0b10010000,
+        0b11100000,
+
+        0b11110000,
+        0b10000000,
+        0b10000000,
+        0b10000000,
+        0b11110000,
+
+        0b11100000,
+        0b10010000,
+        0b10010000,
+        0b10010000,
+        0b11100000,
+
+        0b11110000,
+        0b10000000,
+        0b11110000,
+        0b10000000,
+        0b11110000,
+
+        0b11110000,
+        0b10000000,
+        0b11110000,
+        0b10000000,
+        0b10000000,
+    ];
 }
