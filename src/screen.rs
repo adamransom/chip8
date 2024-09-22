@@ -75,7 +75,16 @@ impl Screen {
             if pixel {
                 rgba.copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF])
             } else {
-                rgba.copy_from_slice(&[0x00, 0x00, 0x00, 0xFF])
+                let mut alpha = rgba[3];
+
+                // Fade out (2-step) to prevent flickering
+                if alpha > 0xFB {
+                    alpha -= 0x02
+                } else {
+                    alpha = alpha.saturating_sub(0x20);
+                }
+
+                rgba.copy_from_slice(&[0xFF, 0xFF, 0xFF, alpha])
             }
         }
 
