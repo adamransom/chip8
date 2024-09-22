@@ -10,18 +10,8 @@ use winit::window::Window;
 
 pub enum Event {
     On(Arc<Window>),
+    Key(u8, bool),
     Off,
-}
-
-pub struct Device {
-    screen: Screen,
-    memory: [u8; 4096],
-    registers: [u8; 16],
-    stack: [u16; 16],
-    pc: u16,
-    sp: usize,
-    i: u16,
-    draw_flag: bool,
 }
 
 struct Opcode {
@@ -34,6 +24,20 @@ struct Opcode {
     n: u8,
 }
 
+pub struct Device {
+    screen: Screen,
+    memory: [u8; 4096],
+    registers: [u8; 16],
+    stack: [u16; 16],
+    keys: [bool; 16],
+    pc: u16,
+    sp: usize,
+    i: u16,
+    dt: u8,
+    wait_key: u8,
+    draw_flag: bool,
+}
+
 impl Device {
     pub fn new(window: Arc<Window>) -> Self {
         Self {
@@ -41,9 +45,12 @@ impl Device {
             memory: [0; 4096],
             registers: [0; 16],
             stack: [0; 16],
+            keys: [false; 16],
             pc: 0x200,
             sp: 0,
             i: 0,
+            dt: 0,
+            wait_key: 0xFF,
             draw_flag: false,
         }
     }
@@ -71,6 +78,12 @@ impl Device {
 
                 // about a 720Mhz clock speed
                 while cycles < 12 {
+                    // simulate blocking execution until
+                    // key is pressed
+                    if self.wait_key != 0xFF {
+                        break;
+                    }
+
                     self.tick();
                     cycles += 1;
 
@@ -81,12 +94,14 @@ impl Device {
                     }
                 }
 
+                self.handle_delay();
                 self.screen.refresh();
             }
 
             'events: loop {
                 match channel.try_recv() {
                     Ok(event) => match event {
+                        Event::Key(key, pressed) => self.handle_key(key, pressed),
                         Event::Off => break 'outer,
                         Event::On(_) => panic!("Should never receive `On`"),
                     },
@@ -94,6 +109,21 @@ impl Device {
                     Err(TryRecvError::Disconnected) => break 'outer,
                 }
             }
+        }
+    }
+
+    fn handle_delay(&mut self) {
+        if self.dt > 0 {
+            self.dt -= 1;
+        }
+    }
+
+    fn handle_key(&mut self, key: u8, pressed: bool) {
+        self.keys[usize::from(key)] = pressed;
+
+        if self.wait_key != 0xFF && !pressed {
+            self.registers[usize::from(self.wait_key)] = key;
+            self.wait_key = 0xFF;
         }
     }
 
@@ -141,15 +171,24 @@ impl Device {
                 0x3 => self.op_8xy3(opcode.x, opcode.y),
                 0x4 => self.op_8xy4(opcode.x, opcode.y),
                 0x5 => self.op_8xy5(opcode.x, opcode.y),
-                0x6 => self.op_8xy6(opcode.x),
+                0x6 => self.op_8xy6(opcode.x, opcode.y),
                 0x7 => self.op_8xy7(opcode.x, opcode.y),
-                0xE => self.op_8xye(opcode.x),
+                0xE => self.op_8xye(opcode.x, opcode.y),
                 _ => panic!("unknown opcode {:04x}", opcode.raw),
             },
             0x9000 => self.op_9xy0(opcode.x, opcode.y),
             0xA000 => self.op_annn(opcode.nnn),
+            0xB000 => self.op_bnnn(opcode.nnn),
             0xD000 => self.op_dxyn(opcode.x, opcode.y, opcode.n),
+            0xE000 => match opcode.kk {
+                0x9e => self.op_ex9e(opcode.x),
+                0xa1 => self.op_exa1(opcode.x),
+                _ => panic!("unknown opcode {:04x}", opcode.raw),
+            },
             0xF000 => match opcode.kk {
+                0x07 => self.op_fx07(opcode.x),
+                0x0A => self.op_fx0a(opcode.x),
+                0x15 => self.op_fx15(opcode.x),
                 0x1e => self.op_fx1e(opcode.x),
                 0x33 => self.op_fx33(opcode.x),
                 0x55 => self.op_fx55(opcode.x),
@@ -224,16 +263,19 @@ impl Device {
     // Set Vx = Vx OR Vy
     fn op_8xy1(&mut self, x: u8, y: u8) {
         self.registers[usize::from(x)] |= self.register(y);
+        self.set_flag(false); // Quirk
     }
 
     // Set Vx = Vx AND Vy
     fn op_8xy2(&mut self, x: u8, y: u8) {
         self.registers[usize::from(x)] &= self.register(y);
+        self.set_flag(false); // Quirk
     }
 
     // Set Vx = Vx XOR Vy
     fn op_8xy3(&mut self, x: u8, y: u8) {
         self.registers[usize::from(x)] ^= self.register(y);
+        self.set_flag(false); // Quirk
     }
 
     // Set Vx = Vx + Vy, set VF = carry
@@ -253,10 +295,10 @@ impl Device {
     }
 
     // Set Vx = Vx SHR 1
-    fn op_8xy6(&mut self, x: u8) {
-        let lsb = self.register(x) & 0b0000_0001;
+    fn op_8xy6(&mut self, x: u8, y: u8) {
+        let lsb = self.register(y) & 0b0000_0001;
 
-        self.registers[usize::from(x)] >>= 1;
+        self.registers[usize::from(x)] = self.register(y) >> 1;
         self.set_flag(lsb);
     }
 
@@ -269,10 +311,10 @@ impl Device {
     }
 
     // Set Vx = Vx SHR 1
-    fn op_8xye(&mut self, x: u8) {
-        let msb = self.register(x) >> 7;
+    fn op_8xye(&mut self, x: u8, y: u8) {
+        let msb = self.register(y) >> 7;
 
-        self.registers[usize::from(x)] <<= 1;
+        self.registers[usize::from(x)] = self.register(y) << 1;
         self.set_flag(msb);
     }
 
@@ -288,6 +330,11 @@ impl Device {
         self.i = nnn;
     }
 
+    // Jump to location nnn + V0
+    fn op_bnnn(&mut self, nnn: u16) {
+        self.pc = nnn + u16::from(self.register(0));
+    }
+
     // Display n-byte sprite starting at memory location I at (Vx, Vy)
     fn op_dxyn(&mut self, x: u8, y: u8, n: u8) {
         let x_pos = self.register(x);
@@ -295,12 +342,39 @@ impl Device {
 
         let sprite = &self.memory[usize::from(self.i)..usize::from(self.i + n as u16)];
 
-        // Set flag if collision detected
-        if self.screen.draw(x_pos, y_pos, sprite) {
-            self.set_flag(true);
-        }
+        let collision = self.screen.draw(x_pos, y_pos, sprite);
+        self.set_flag(collision);
 
         self.draw_flag = true;
+    }
+
+    // Skip the next instruction if key with the value of Vx is pressed
+    fn op_ex9e(&mut self, x: u8) {
+        if self.keys[usize::from(self.register(x))] {
+            self.pc += 2
+        }
+    }
+
+    // Skip the next instruction if key with the value of Vx is not pressed
+    fn op_exa1(&mut self, x: u8) {
+        if !self.keys[usize::from(self.register(x))] {
+            self.pc += 2
+        }
+    }
+
+    // Set Vx = delay timer value
+    fn op_fx07(&mut self, x: u8) {
+        self.registers[usize::from(x)] = self.dt;
+    }
+
+    // Wait for a key press, store the value of the key in Vx
+    fn op_fx0a(&mut self, x: u8) {
+        self.wait_key = x;
+    }
+
+    // Set delay timer = Vx
+    fn op_fx15(&mut self, x: u8) {
+        self.dt = self.register(x);
     }
 
     // Set I = I + Vx

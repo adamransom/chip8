@@ -40,7 +40,7 @@ impl Screen {
             let y_pos = wrapped_y + y_row;
 
             // clip sprites
-            if y_pos > HEIGHT.into() {
+            if y_pos >= HEIGHT.into() {
                 break;
             }
 
@@ -49,7 +49,7 @@ impl Screen {
                 let x_pos = wrapped_x + x_column;
 
                 // clip sprites
-                if x_pos > WIDTH.into() {
+                if x_pos >= WIDTH.into() {
                     break;
                 }
 
