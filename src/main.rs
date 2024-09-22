@@ -3,6 +3,7 @@ mod device;
 mod screen;
 
 use log::{info, LevelFilter};
+use std::env;
 use std::sync::mpsc::channel;
 use std::thread;
 use winit::event_loop::EventLoop;
@@ -13,6 +14,8 @@ fn main() {
     env_logger::builder()
         .filter_module("chip8", LevelFilter::Debug)
         .init();
+
+    let path = env::args().last().expect("Must provide ROM path");
 
     let (sender, receiver) = channel();
 
@@ -26,7 +29,7 @@ fn main() {
             _ => panic!("First event must be `On`"),
         };
 
-        device.load("roms/5-quirks.ch8");
+        device.load(&path);
         device.run(receiver);
     });
 
